@@ -113,6 +113,7 @@
                     <option value="mcq">Trắc nghiệm (MCQ)</option>
                     <option value="true_false">Đúng / Sai</option>
                     <option value="fill_in">Điền vào chỗ trống</option>
+                    <option value="matching">Ghép đôi</option>
                 </select>
             </div>
             <div class="form-group">
@@ -149,7 +150,8 @@
 </div>
 
 <script src="data.js"></script>
-<script>
+
+<!-- <script>
 let CURRENT_WEEK = null;
 let EDIT_INDEX = -1;
 
@@ -376,6 +378,319 @@ function exportData() {
 }
 
 init();
+</script> -->
+
+<script>
+    let CURRENT_WEEK = null;
+let EDIT_INDEX = -1;
+let CURRENT_IMAGE_BASE64 = "";
+
+// 1. Khởi tạo dữ liệu
+function init() {
+    const saved = localStorage.getItem('NETQUIZ_DATA');
+    if(saved) {
+        try { DATA = JSON.parse(saved); } catch(e) { console.error("Lỗi data:", e); }
+    }
+    
+    const weekList = document.getElementById('weekList');
+    weekList.innerHTML = '';
+    
+    // Tự động nhận diện tuần từ DATA.weeks hoặc DATA.week_info
+    const weeks = Object.keys(DATA.weeks || {});
+    weeks.forEach(wk => {
+        const info = (DATA.week_info && DATA.week_info[wk]) ? DATA.week_info[wk] : {label: 'Tuần ' + wk, desc: ''};
+        const div = document.createElement('div');
+        div.className = 'week-item';
+        div.id = `wk-${wk}`;
+        div.innerHTML = `<strong>${info.label}</strong><br><small>${info.desc}</small>`;
+        div.onclick = () => selectWeek(wk);
+        weekList.appendChild(div);
+    });
+}
+
+function selectWeek(wk) {
+    CURRENT_WEEK = wk;
+    document.querySelectorAll('.week-item').forEach(el => el.classList.remove('active'));
+    const target = document.getElementById(`wk-${wk}`);
+    if(target) target.classList.add('active');
+    
+    document.getElementById('currentWeekTitle').innerText = (DATA.week_info[wk] ? DATA.week_info[wk].label : 'Tuần ' + wk);
+    document.getElementById('btnAdd').disabled = false;
+    renderQuestions();
+}
+
+function renderQuestions() {
+    const list = document.getElementById('qList');
+    list.innerHTML = '';
+    const qs = DATA.weeks[CURRENT_WEEK] || [];
+    
+    if(qs.length === 0) {
+        list.innerHTML = `<div style="text-align:center; margin-top:50px; color:var(--dim)">Chưa có câu hỏi.</div>`;
+        return;
+    }
+
+    qs.forEach((q, i) => {
+        const card = document.createElement('div');
+        card.className = 'q-card';
+        card.innerHTML = `
+            <div class="q-actions">
+                <button class="btn btn-outline" style="padding:4px 8px" onclick="openEditor(${i})">Sửa</button>
+                <button class="btn btn-danger" style="padding:4px 8px" onclick="deleteQuestion(${i})">Xóa</button>
+            </div>
+            <div style="margin-bottom:8px">
+                <span style="background:var(--b1); padding:2px 6px; border-radius:4px; font-size:0.7rem; color:var(--acc)">${q.type.toUpperCase()}</span>
+                <span style="color:var(--dim); font-size:0.7rem; margin-left:10px">ID: ${q.id}</span>
+            </div>
+            <div style="padding-right:100px; font-weight:500">${q.question.substring(0, 150)}...</div>
+        `;
+        list.appendChild(card);
+    });
+}
+
+// 2. Xử lý UI động cho từng loại câu hỏi
+function toggleOptionFields() {
+    const type = document.getElementById('f-type').value;
+    const container = document.getElementById('opt-list');
+    const btnAdd = document.getElementById('btn-add-opt');
+    container.innerHTML = '';
+
+    if (type === 'matching') {
+        document.getElementById('opt-label').innerText = "Cấu trúc Matching (Cột trái ghép với Cột phải)";
+        // Đối với matching, ta sẽ tạo 2 khu vực riêng bên trong opt-list
+        container.innerHTML = `
+            <div style="margin-bottom:15px">
+                <label style="color:var(--grn); font-size:0.8rem">1. Danh sách lựa chọn (Cột phải - A, B, C...)</label>
+                <div id="matching-choices-area"></div>
+                <button class="btn btn-outline" style="font-size:0.7rem; margin-top:5px" onclick="addMatchingChoiceRow()">+ Thêm lựa chọn</button>
+            </div>
+            <div>
+                <label style="color:var(--acc); font-size:0.8rem">2. Các vế cần ghép (Cột trái)</label>
+                <div id="matching-matches-area"></div>
+                <button class="btn btn-outline" style="font-size:0.7rem; margin-top:5px" onclick="addMatchingMatchRow()">+ Thêm vế ghép</button>
+            </div>
+        `;
+        btnAdd.style.display = 'none'; // Ẩn nút mặc định, dùng 2 nút riêng bên trên
+    } else {
+        document.getElementById('opt-label').innerText = "Các phương án & Đáp án";
+        btnAdd.style.display = (type === 'mcq') ? 'block' : 'none';
+        if(type === 'true_false') {
+            addGeneralOptionRow("Đúng", true);
+            addGeneralOptionRow("Sai", false);
+        } else if(type === 'fill_in') {
+            addGeneralOptionRow("", true);
+        }
+    }
+}
+
+// Hàm thêm dòng cho MCQ/TF/Fill
+function addGeneralOptionRow(text = "", isCorrect = false) {
+    const type = document.getElementById('f-type').value;
+    const container = document.getElementById('opt-list');
+    const div = document.createElement('div');
+    div.className = 'opt-row';
+    div.style = "display:flex; gap:10px; align-items:center; margin-bottom:8px";
+    
+    const inputType = (type === 'mcq') ? 'checkbox' : 'radio';
+    div.innerHTML = `
+        <input type="${inputType}" name="correct-group" class="opt-check" ${isCorrect ? 'checked' : ''} style="width:20px">
+        <input type="text" class="opt-text" value="${text}" placeholder="Nội dung..." style="flex:1">
+        ${type === 'mcq' ? `<button onclick="this.parentElement.remove()" style="background:none; border:none; color:var(--red); cursor:pointer">✕</button>` : ''}
+    `;
+    container.appendChild(div);
+}
+
+// --- LOGIC RIÊNG CHO MATCHING ---
+function addMatchingChoiceRow(label = "") {
+    const area = document.getElementById('matching-choices-area');
+    const count = area.children.length;
+    const key = String.fromCharCode(65 + count);
+    const div = document.createElement('div');
+    div.className = 'choice-row';
+    div.style = "display:flex; gap:10px; margin-bottom:5px";
+    div.innerHTML = `
+        <span style="color:var(--grn); font-weight:bold; width:20px">${key}</span>
+        <input type="text" class="choice-label" value="${label}" placeholder="Tên lựa chọn..." style="flex:1" oninput="refreshMatchDropdowns()">
+        <button onclick="this.parentElement.remove(); refreshMatchDropdowns();" style="border:none; background:none; color:var(--red)">✕</button>
+    `;
+    area.appendChild(div);
+    refreshMatchDropdowns();
+}
+
+function addMatchingMatchRow(item = "", selectedKey = "A") {
+    const area = document.getElementById('matching-matches-area');
+    const div = document.createElement('div');
+    div.className = 'match-row';
+    div.style = "display:flex; gap:10px; margin-bottom:10px";
+    
+    // Lấy danh sách các choice hiện tại để tạo dropdown
+    const choiceInputs = document.querySelectorAll('.choice-label');
+    let optionsHtml = '';
+    choiceInputs.forEach((input, i) => {
+        const key = String.fromCharCode(65 + i);
+        optionsHtml += `<option value="${key}" ${key === selectedKey ? 'selected' : ''}>${key}: ${input.value}</option>`;
+    });
+
+    div.innerHTML = `
+        <textarea class="match-item-text" placeholder="Nội dung vế trái..." style="flex:2; height:40px">${item}</textarea>
+        <select class="match-key-select" style="flex:1">${optionsHtml}</select>
+        <button onclick="this.parentElement.remove()" style="border:none; background:none; color:var(--red)">✕</button>
+    `;
+    area.appendChild(div);
+}
+
+function refreshMatchDropdowns() {
+    const choiceInputs = document.querySelectorAll('.choice-label');
+    const selects = document.querySelectorAll('.match-key-select');
+    
+    let optionsHtml = '';
+    choiceInputs.forEach((input, i) => {
+        const key = String.fromCharCode(65 + i);
+        optionsHtml += `<option value="${key}">${key}: ${input.value}</option>`;
+    });
+
+    selects.forEach(sel => {
+        const currentVal = sel.value;
+        sel.innerHTML = optionsHtml;
+        sel.value = currentVal;
+    });
+}
+// --- KẾT THÚC LOGIC MATCHING ---
+
+// 3. Hàm Mở Editor (Sửa nút addOptionField thành addGeneralOptionRow)
+function addOptionField() { addGeneralOptionRow(); }
+
+function openEditor(idx = -1) {
+    EDIT_INDEX = idx;
+    document.getElementById('modal').style.display = 'flex';
+    document.getElementById('f-img-preview').style.display = 'none';
+    CURRENT_IMAGE_BASE64 = "";
+
+    if(idx === -1) {
+        document.getElementById('modalTitle').innerText = "Thêm câu hỏi mới";
+        document.getElementById('f-question').value = '';
+        document.getElementById('f-explanation').value = '';
+        toggleOptionFields();
+    } else {
+        const q = DATA.weeks[CURRENT_WEEK][idx];
+        document.getElementById('modalTitle').innerText = "Sửa câu hỏi";
+        document.getElementById('f-type').value = q.type;
+        document.getElementById('f-question').value = q.question;
+        document.getElementById('f-explanation').value = q.explanation || '';
+        if(q.image) {
+            CURRENT_IMAGE_BASE64 = q.image;
+            document.getElementById('f-img-preview').src = q.image;
+            document.getElementById('f-img-preview').style.display = 'block';
+        }
+
+        toggleOptionFields(); // Render khung giao diện theo type
+
+        if (q.type === 'matching') {
+            (q.choices || []).forEach(c => addMatchingChoiceRow(c.label));
+            (q.matches || []).forEach(m => addMatchingMatchRow(m.item, m.answer_key));
+        } else {
+            (q.choices || q.options || []).forEach(opt => {
+                const isCorrect = (q.answer || []).includes(opt.key);
+                addGeneralOptionRow(opt.label || opt.text, isCorrect);
+            });
+        }
+    }
+}
+
+// 4. Lưu dữ liệu
+function saveQuestion() {
+    const type = document.getElementById('f-type').value;
+    const question = document.getElementById('f-question').value;
+    const explanation = document.getElementById('f-explanation').value;
+    
+    let result = {
+        id: EDIT_INDEX === -1 ? Date.now() : DATA.weeks[CURRENT_WEEK][EDIT_INDEX].id,
+        week: parseInt(CURRENT_WEEK),
+        type: type,
+        question: question,
+        explanation: explanation,
+        image: CURRENT_IMAGE_BASE64
+    };
+
+    if (type === 'matching') {
+        const choiceRows = document.querySelectorAll('.choice-row');
+        let choices = [];
+        choiceRows.forEach((row, i) => {
+            choices.push({ key: String.fromCharCode(65 + i), label: row.querySelector('.choice-label').value });
+        });
+
+        const matchRows = document.querySelectorAll('.match-row');
+        let matches = [];
+        matchRows.forEach(row => {
+            const aKey = row.querySelector('.match-key-select').value;
+            const choice = choices.find(c => c.key === aKey);
+            matches.push({
+                item: row.querySelector('.match-item-text').value,
+                answer_key: aKey,
+                answer_label: choice ? choice.label : ""
+            });
+        });
+        result.choices = choices;
+        result.matches = matches;
+    } else {
+        const rows = document.querySelectorAll('.opt-row');
+        let choices = [];
+        let answer = [];
+        rows.forEach((row, i) => {
+            const key = String.fromCharCode(65 + i);
+            const label = row.querySelector('.opt-text').value;
+            choices.push({ key, label });
+            if(row.querySelector('.opt-check').checked) answer.push(key);
+        });
+        result.choices = choices;
+        result.answer = answer;
+    }
+
+    if(EDIT_INDEX === -1) DATA.weeks[CURRENT_WEEK].push(result);
+    else DATA.weeks[CURRENT_WEEK][EDIT_INDEX] = result;
+
+    syncAndReload();
+    closeEditor();
+}
+
+// --- Các hàm phụ trợ giữ nguyên logic của bạn ---
+function handleLocalImage(input) {
+    const file = input.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            CURRENT_IMAGE_BASE64 = e.target.result;
+            document.getElementById('f-img-preview').src = e.target.result;
+            document.getElementById('f-img-preview').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+function deleteQuestion(idx) {
+    if(confirm("Xóa câu hỏi này?")) {
+        DATA.weeks[CURRENT_WEEK].splice(idx, 1);
+        syncAndReload();
+    }
+}
+
+function syncAndReload() {
+    localStorage.setItem('NETQUIZ_DATA', JSON.stringify(DATA));
+    renderQuestions();
+}
+
+function closeEditor() { document.getElementById('modal').style.display = 'none'; }
+
+function exportData() {
+    const content = "let DATA = " + JSON.stringify(DATA, null, 2) + ";";
+    const blob = new Blob([content], {type: "text/javascript"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "data.js";
+    a.click();
+}
+
+window.onload = init;
 </script>
+
 </body>
 </html>

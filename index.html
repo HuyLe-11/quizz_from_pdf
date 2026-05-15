@@ -343,10 +343,15 @@ body{background:var(--bg);color:var(--txt);font-family:'Be Vietnam Pro',sans-ser
 .fill-input:disabled{cursor:default}
 
 /* Explanation */
-.explanation-box{
-  margin-top:12px;padding:12px 16px;border-radius:var(--r);
-  background:rgba(124,77,255,.08);border:1px solid rgba(124,77,255,.25);
-  font-size:.84rem;line-height:1.55;color:var(--dim);
+/* Tìm class hiển thị giải thích của bạn, thường là .explanation-box */
+.explanation-box {
+    white-space: pre-wrap;    /* Giữ nguyên các dấu xuống dòng từ data */
+    word-wrap: break-word;    /* Đảm bảo text không bị tràn khung */
+    line-height: 1.6;         /* Khoảng cách dòng cho dễ đọc */
+    padding: 15px;
+    background: var(--s2);
+    border-left: 4px solid var(--acc);
+    margin-top: 15px;
 }
 .explanation-box strong{color:#a78bfa}
 
